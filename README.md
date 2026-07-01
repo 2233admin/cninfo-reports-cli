@@ -45,6 +45,29 @@ cargo run -- query `
 The `query` command uses `stocks.json` by default. Use `--stocks-json` to point
 at another cache file.
 
+## Output Locations
+
+By default:
+
+- Announcement metadata is printed to stdout.
+- PDF files are downloaded only when `--download` is passed.
+- PDF files go to `data/` under the current working directory.
+- Stock cache data is read from `stocks.json` under the current working
+  directory.
+
+Use `--output-json <path>` to save announcement metadata to a JSON file, and use
+`--output-dir <dir>` to choose the PDF download directory.
+
+For example:
+
+```powershell
+cargo run -- query `
+  --stock 000001 `
+  --output-json output/000001-announcements.json `
+  --download `
+  --output-dir output/pdfs
+```
+
 Common markets are:
 
 - `szse`: A-share Shenzhen/Shanghai/Beijing announcements

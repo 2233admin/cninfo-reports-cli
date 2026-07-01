@@ -111,6 +111,18 @@ async fn main() -> Result<()> {
                 date_range,
             };
 
+            eprintln!("date range: {}", query.date_range);
+            if let Some(path) = &output_json {
+                eprintln!("announcement JSON: {}", path.display());
+            } else {
+                eprintln!("announcement JSON: stdout");
+            }
+            if download {
+                eprintln!("PDF output directory: {}", output_dir.display());
+            } else {
+                eprintln!("PDF download: disabled");
+            }
+
             let announcements = client.query_announcements(&stocks, &query).await?;
             println!("{}", serde_json::to_string_pretty(&announcements)?);
 
