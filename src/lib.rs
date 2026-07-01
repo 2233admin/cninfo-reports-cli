@@ -1,11 +1,14 @@
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
+use std::sync::atomic::{AtomicUsize, Ordering};
 
 use anyhow::{Context, Result, anyhow};
 use futures::{StreamExt, stream};
 use reqwest::header::{COOKIE, HeaderMap, HeaderValue};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
+use tokio::time::{Duration, sleep};
 
 const BASE_URL: &str = "http://www.cninfo.com.cn";
 const STATIC_URL: &str = "http://static.cninfo.com.cn";
@@ -52,7 +55,7 @@ struct QueryResponse {
     #[serde(rename = "hasMore")]
     has_more: bool,
     #[serde(default)]
-    announcements: Vec<Value>,
+    announcements: Option<Vec<Value>>,
 }
 
 impl CnInfoClient {
@@ -175,7 +178,7 @@ impl CnInfoClient {
                 .await
                 .context("failed to parse announcement response")?;
 
-            announcements.extend(response.announcements);
+            announcements.extend(response.announcements.unwrap_or_default());
             if !response.has_more {
                 break;
             }
@@ -189,21 +192,63 @@ impl CnInfoClient {
             .await
             .with_context(|| format!("failed to create {}", output_dir.display()))?;
 
+        let total = announcements.len();
+        let completed = Arc::new(AtomicUsize::new(0));
         let results = stream::iter(announcements.iter().cloned())
             .map(|announcement| {
                 let client = self.clone();
                 let output_dir = output_dir.to_path_buf();
-                async move { client.download_one_pdf(&announcement, &output_dir).await }
+                let completed = Arc::clone(&completed);
+                async move {
+                    let result = client
+                        .download_one_pdf_with_retries(&announcement, &output_dir)
+                        .await;
+                    let done = completed.fetch_add(1, Ordering::Relaxed) + 1;
+                    if done == total || done.is_multiple_of(100) {
+                        eprintln!("PDF progress: {done}/{total}");
+                    }
+                    result
+                }
             })
             .buffer_unordered(self.max_concurrent)
             .collect::<Vec<_>>()
             .await;
 
+        let mut failures = 0usize;
         for result in results {
-            result?;
+            if let Err(error) = result {
+                failures += 1;
+                eprintln!("PDF failed: {error:#}");
+            }
+        }
+
+        if failures > 0 {
+            eprintln!("PDF failures: {failures}");
         }
 
         Ok(())
+    }
+
+    async fn download_one_pdf_with_retries(
+        &self,
+        announcement: &Value,
+        output_dir: &Path,
+    ) -> Result<()> {
+        let mut last_error = None;
+
+        for attempt in 1..=3 {
+            match self.download_one_pdf(announcement, output_dir).await {
+                Ok(()) => return Ok(()),
+                Err(error) => {
+                    last_error = Some(error);
+                    if attempt < 3 {
+                        sleep(Duration::from_secs(attempt)).await;
+                    }
+                }
+            }
+        }
+
+        Err(last_error.expect("retry loop should store the last error"))
     }
 
     async fn download_one_pdf(&self, announcement: &Value, output_dir: &Path) -> Result<()> {
@@ -211,12 +256,13 @@ impl CnInfoClient {
         let sec_name = sanitize_path_component(required_str(announcement, "secName")?);
         let title = sanitize_path_component(required_str(announcement, "announcementTitle")?);
         let adjunct_type = required_str(announcement, "adjunctType")?;
-        let adjunct_url = required_str(announcement, "adjunctUrl")?;
-        let announcement_id = required_str(announcement, "announcementId")?;
 
         if adjunct_type != "PDF" {
             return Ok(());
         }
+
+        let adjunct_url = required_str(announcement, "adjunctUrl")?;
+        let announcement_id = required_str(announcement, "announcementId")?;
 
         let stock_dir = output_dir.join(format!("{sec_code}_{sec_name}"));
         tokio::fs::create_dir_all(&stock_dir)
@@ -258,6 +304,7 @@ pub async fn load_stocks(path: &Path) -> Result<MarketStocks> {
 }
 
 pub async fn save_stocks(path: &Path, stocks: &MarketStocks) -> Result<()> {
+    create_parent_dir(path).await?;
     let data = serde_json::to_string_pretty(stocks).context("failed to serialize stock data")?;
     tokio::fs::write(path, data)
         .await
@@ -265,11 +312,32 @@ pub async fn save_stocks(path: &Path, stocks: &MarketStocks) -> Result<()> {
 }
 
 pub async fn save_announcements(path: &Path, announcements: &[Value]) -> Result<()> {
+    create_parent_dir(path).await?;
     let data =
         serde_json::to_string_pretty(announcements).context("failed to serialize results")?;
     tokio::fs::write(path, data)
         .await
         .with_context(|| format!("failed to write {}", path.display()))
+}
+
+pub async fn load_announcements(path: &Path) -> Result<Vec<Value>> {
+    let data = tokio::fs::read_to_string(path)
+        .await
+        .with_context(|| format!("failed to read {}", path.display()))?;
+    serde_json::from_str(&data).with_context(|| format!("failed to parse {}", path.display()))
+}
+
+async fn create_parent_dir(path: &Path) -> Result<()> {
+    if let Some(parent) = path
+        .parent()
+        .filter(|parent| !parent.as_os_str().is_empty())
+    {
+        tokio::fs::create_dir_all(parent)
+            .await
+            .with_context(|| format!("failed to create {}", parent.display()))?;
+    }
+
+    Ok(())
 }
 
 fn valid_stock_payload(
@@ -280,6 +348,10 @@ fn valid_stock_payload(
     let market_stocks = stocks
         .get(market)
         .ok_or_else(|| anyhow!("unknown market: {market}"))?;
+
+    if stock_codes.is_empty() {
+        return Ok(String::new());
+    }
 
     let valid = stock_codes
         .iter()
