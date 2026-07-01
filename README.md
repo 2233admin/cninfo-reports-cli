@@ -1,4 +1,4 @@
-# CnInfoReports
+# cninfo-reports-cli
 
 Rust CLI for querying and downloading announcements from
 [巨潮资讯网](http://www.cninfo.com.cn/).

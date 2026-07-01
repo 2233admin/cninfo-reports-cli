@@ -2,7 +2,7 @@ use std::path::PathBuf;
 
 use anyhow::Result;
 use clap::{Args, Parser, Subcommand};
-use cninfo_reports::{
+use cninfo_reports_cli::{
     AnnouncementQuery, CnInfoClient, default_stocks_path, load_stocks, save_announcements,
     save_stocks,
 };
