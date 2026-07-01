@@ -252,28 +252,18 @@ impl CnInfoClient {
     }
 
     async fn download_one_pdf(&self, announcement: &Value, output_dir: &Path) -> Result<()> {
-        let sec_code = required_str(announcement, "secCode")?;
-        let sec_name = sanitize_path_component(required_str(announcement, "secName")?);
-        let title = sanitize_path_component(required_str(announcement, "announcementTitle")?);
-        let adjunct_type = required_str(announcement, "adjunctType")?;
-
-        if !is_pdf_adjunct(adjunct_type) {
+        let Some(pdf_path) = announcement_pdf_path(announcement, output_dir)? else {
+            return Ok(());
+        };
+        let adjunct_url = required_str(announcement, "adjunctUrl")?;
+        if tokio::fs::try_exists(&pdf_path).await.unwrap_or(false) {
             return Ok(());
         }
 
-        let adjunct_url = required_str(announcement, "adjunctUrl")?;
-        let announcement_id = required_str(announcement, "announcementId")?;
-
-        let stock_dir = output_dir.join(format!("{sec_code}_{sec_name}"));
-        tokio::fs::create_dir_all(&stock_dir)
-            .await
-            .with_context(|| format!("failed to create {}", stock_dir.display()))?;
-
-        let pdf_path = stock_dir.join(format!(
-            "{sec_code}_{sec_name}_{title}_{announcement_id}.pdf"
-        ));
-        if tokio::fs::try_exists(&pdf_path).await.unwrap_or(false) {
-            return Ok(());
+        if let Some(stock_dir) = pdf_path.parent() {
+            tokio::fs::create_dir_all(stock_dir)
+                .await
+                .with_context(|| format!("failed to create {}", stock_dir.display()))?;
         }
 
         let bytes = self
@@ -338,6 +328,23 @@ async fn create_parent_dir(path: &Path) -> Result<()> {
     }
 
     Ok(())
+}
+
+pub fn announcement_pdf_path(announcement: &Value, output_dir: &Path) -> Result<Option<PathBuf>> {
+    let adjunct_type = required_str(announcement, "adjunctType")?;
+    if !is_pdf_adjunct(adjunct_type) {
+        return Ok(None);
+    }
+
+    let sec_code = required_str(announcement, "secCode")?;
+    let sec_name = sanitize_path_component(required_str(announcement, "secName")?);
+    let title = sanitize_path_component(required_str(announcement, "announcementTitle")?);
+    let announcement_id = required_str(announcement, "announcementId")?;
+    let stock_dir = output_dir.join(format!("{sec_code}_{sec_name}"));
+
+    Ok(Some(stock_dir.join(format!(
+        "{sec_code}_{sec_name}_{title}_{announcement_id}.pdf"
+    ))))
 }
 
 fn valid_stock_payload(
@@ -416,6 +423,27 @@ mod tests {
         assert!(is_pdf_adjunct(".PDF"));
         assert!(is_pdf_adjunct("pdf"));
         assert!(!is_pdf_adjunct("XLS"));
+    }
+
+    #[test]
+    fn builds_announcement_pdf_path() {
+        let announcement = serde_json::json!({
+            "secCode": "000001",
+            "secName": "平安/银行",
+            "announcementTitle": "2025:年度报告",
+            "announcementId": "123",
+            "adjunctType": ".PDF"
+        });
+        let path = announcement_pdf_path(&announcement, Path::new("out"))
+            .unwrap()
+            .unwrap();
+
+        assert_eq!(
+            path,
+            PathBuf::from("out")
+                .join("000001_平安-银行")
+                .join("000001_平安-银行_2025-年度报告_123.pdf")
+        );
     }
 
     #[test]

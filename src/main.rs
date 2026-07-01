@@ -1,11 +1,12 @@
-use std::path::PathBuf;
+use std::fs;
+use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result, anyhow};
 use chrono::{Datelike, Days, Local, NaiveDate};
 use clap::{Args, Parser, Subcommand};
 use cninfo_reports_cli::{
-    AnnouncementQuery, CnInfoClient, default_stocks_path, load_announcements, load_stocks,
-    save_announcements, save_stocks,
+    AnnouncementQuery, CnInfoClient, announcement_pdf_path, default_stocks_path,
+    load_announcements, load_stocks, save_announcements, save_stocks,
 };
 use serde_json::Value;
 use std::collections::{HashSet, VecDeque};
@@ -37,6 +38,20 @@ enum Command {
         /// Maximum concurrent PDF downloads.
         #[arg(long, default_value_t = 5)]
         max_concurrent: usize,
+    },
+    /// Compare saved announcement JSON with downloaded PDF files.
+    Audit {
+        /// Announcement JSON produced by the query command.
+        input_json: PathBuf,
+        /// Directory containing downloaded PDFs.
+        #[arg(long, default_value = "data")]
+        output_dir: PathBuf,
+        /// Maximum missing PDF paths to print.
+        #[arg(long, default_value_t = 50)]
+        missing_limit: usize,
+        /// Exit with an error when expected PDFs are missing.
+        #[arg(long)]
+        strict: bool,
     },
 }
 
@@ -182,9 +197,139 @@ async fn main() -> Result<()> {
             client.download_pdfs(&announcements, &output_dir).await?;
             eprintln!("downloaded PDFs into {}", output_dir.display());
         }
+        Command::Audit {
+            input_json,
+            output_dir,
+            missing_limit,
+            strict,
+        } => {
+            let announcements = load_announcements(&input_json).await?;
+            let audit = audit_downloads(&announcements, &output_dir)?;
+            print_audit(&input_json, &output_dir, &audit, missing_limit);
+
+            if strict && !audit.missing_expected_pdfs.is_empty() {
+                return Err(anyhow!(
+                    "{} expected PDF files are missing",
+                    audit.missing_expected_pdfs.len()
+                ));
+            }
+        }
     }
 
     Ok(())
+}
+
+#[derive(Debug)]
+struct AuditResult {
+    metadata_records: usize,
+    expected_pdf_records: usize,
+    non_pdf_records: usize,
+    downloaded_expected_pdfs: usize,
+    missing_expected_pdfs: Vec<PathBuf>,
+    total_pdf_files: usize,
+    total_pdf_bytes: u64,
+}
+
+fn audit_downloads(announcements: &[Value], output_dir: &Path) -> Result<AuditResult> {
+    let mut expected_pdf_records = 0usize;
+    let mut downloaded_expected_pdfs = 0usize;
+    let mut missing_expected_pdfs = Vec::new();
+
+    for announcement in announcements {
+        if let Some(pdf_path) = announcement_pdf_path(announcement, output_dir)? {
+            expected_pdf_records += 1;
+            if pdf_path.exists() {
+                downloaded_expected_pdfs += 1;
+            } else {
+                missing_expected_pdfs.push(pdf_path);
+            }
+        }
+    }
+
+    let (total_pdf_files, total_pdf_bytes) = count_pdf_files(output_dir)?;
+
+    Ok(AuditResult {
+        metadata_records: announcements.len(),
+        expected_pdf_records,
+        non_pdf_records: announcements.len() - expected_pdf_records,
+        downloaded_expected_pdfs,
+        missing_expected_pdfs,
+        total_pdf_files,
+        total_pdf_bytes,
+    })
+}
+
+fn print_audit(input_json: &Path, output_dir: &Path, audit: &AuditResult, missing_limit: usize) {
+    println!("announcement JSON: {}", input_json.display());
+    println!("PDF output directory: {}", output_dir.display());
+    println!();
+    println!("| item | count |");
+    println!("|---|---:|");
+    println!("| metadata records | {} |", audit.metadata_records);
+    println!("| expected PDF records | {} |", audit.expected_pdf_records);
+    println!("| non-PDF records | {} |", audit.non_pdf_records);
+    println!(
+        "| downloaded expected PDFs | {} |",
+        audit.downloaded_expected_pdfs
+    );
+    println!(
+        "| missing expected PDFs | {} |",
+        audit.missing_expected_pdfs.len()
+    );
+    println!(
+        "| total PDF files in directory | {} |",
+        audit.total_pdf_files
+    );
+    println!("| total PDF bytes | {} |", audit.total_pdf_bytes);
+
+    if !audit.missing_expected_pdfs.is_empty() {
+        println!();
+        println!("missing PDF paths:");
+        for path in audit.missing_expected_pdfs.iter().take(missing_limit) {
+            println!("- {}", path.display());
+        }
+        if audit.missing_expected_pdfs.len() > missing_limit {
+            println!(
+                "- ... {} more",
+                audit.missing_expected_pdfs.len() - missing_limit
+            );
+        }
+    }
+}
+
+fn count_pdf_files(output_dir: &Path) -> Result<(usize, u64)> {
+    if !output_dir.exists() {
+        return Ok((0, 0));
+    }
+
+    let mut count = 0usize;
+    let mut bytes = 0u64;
+    let mut dirs = VecDeque::from([output_dir.to_path_buf()]);
+
+    while let Some(dir) = dirs.pop_front() {
+        for entry in
+            fs::read_dir(&dir).with_context(|| format!("failed to read {}", dir.display()))?
+        {
+            let entry =
+                entry.with_context(|| format!("failed to read entry in {}", dir.display()))?;
+            let path = entry.path();
+            let metadata = entry
+                .metadata()
+                .with_context(|| format!("failed to stat {}", path.display()))?;
+            if metadata.is_dir() {
+                dirs.push_back(path);
+            } else if path
+                .extension()
+                .and_then(|extension| extension.to_str())
+                .is_some_and(|extension| extension.eq_ignore_ascii_case("pdf"))
+            {
+                count += 1;
+                bytes += metadata.len();
+            }
+        }
+    }
+
+    Ok((count, bytes))
 }
 
 fn default_date_range() -> String {

@@ -76,6 +76,13 @@ cargo run -- download-json output/a-share-reports.json `
   --max-concurrent 8
 ```
 
+核对元数据和 PDF 是否完整对齐：
+
+```powershell
+cargo run -- audit output/a-share-reports.json `
+  --output-dir output/a-share-reports-pdf
+```
+
 ## 默认时间范围
 
 `query` 默认使用“当前年份截至今天”的范围。
@@ -136,6 +143,32 @@ PDF output directory: output/000001-pdf
 | `--download` | 下载公告 PDF |
 | `--output-dir <目录>` | 指定 PDF 下载目录 |
 | `--max-concurrent <数量>` | PDF 并发下载数，默认 `5` |
+
+## 完整性校验
+
+`audit` 命令不会访问网络，只读取已保存的公告 JSON，并按照下载器同一套
+PDF 文件命名规则检查目录：
+
+```powershell
+cargo run -- audit crawl-output/a-share-reports-2026-ytd.json `
+  --output-dir data-a-share-reports-2026-ytd
+```
+
+输出会包含：
+
+- 元数据公告记录数
+- 应有 PDF 的公告记录数
+- 已下载且匹配元数据的 PDF 数
+- 缺失的 PDF 数和缺失路径样例
+- 下载目录里的 PDF 文件总数和总大小
+
+如果要在脚本里把缺失视为失败，可以加 `--strict`：
+
+```powershell
+cargo run -- audit crawl-output/a-share-reports-2026-ytd.json `
+  --output-dir data-a-share-reports-2026-ytd `
+  --strict
+```
 
 ## 大盘抓取建议
 
