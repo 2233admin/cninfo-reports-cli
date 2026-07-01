@@ -1,6 +1,7 @@
 use std::path::PathBuf;
 
 use anyhow::Result;
+use chrono::{Datelike, Local, NaiveDate};
 use clap::{Args, Parser, Subcommand};
 use cninfo_reports_cli::{
     AnnouncementQuery, CnInfoClient, default_stocks_path, load_stocks, save_announcements,
@@ -49,9 +50,9 @@ struct QueryArgs {
     /// Title keyword.
     #[arg(long, default_value = "")]
     searchkey: String,
-    /// Date range formatted as YYYY-MM-DD~YYYY-MM-DD.
+    /// Date range formatted as YYYY-MM-DD~YYYY-MM-DD. Defaults to current year-to-date.
     #[arg(long)]
-    date_range: String,
+    date_range: Option<String>,
     /// Path to local stock cache JSON.
     #[arg(long, default_value_os_t = default_stocks_path())]
     stocks_json: PathBuf,
@@ -96,6 +97,7 @@ async fn main() -> Result<()> {
                 output_dir,
                 max_concurrent,
             } = *args;
+            let date_range = date_range.unwrap_or_else(default_date_range);
             let stocks = load_stocks(&stocks_json).await?;
             let client = CnInfoClient::new(max_concurrent)?;
             let query = AnnouncementQuery {
@@ -125,4 +127,24 @@ async fn main() -> Result<()> {
     }
 
     Ok(())
+}
+
+fn default_date_range() -> String {
+    current_year_to_date(Local::now().date_naive())
+}
+
+fn current_year_to_date(today: NaiveDate) -> String {
+    format!("{}-01-01~{}", today.year(), today.format("%Y-%m-%d"))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn defaults_to_current_year_to_date() {
+        let today = NaiveDate::from_ymd_opt(2026, 7, 2).unwrap();
+
+        assert_eq!(current_year_to_date(today), "2026-01-01~2026-07-02");
+    }
 }

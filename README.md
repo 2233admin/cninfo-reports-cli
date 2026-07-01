@@ -25,9 +25,12 @@ cargo run -- query `
   --stock 000001 `
   --category category_ndbg_szsh `
   --category category_bndbg_szsh `
-  --date-range 2023-01-01~2023-12-31 `
   --output-json announcements.json
 ```
+
+By default, `query` uses the current year-to-date range, for example
+`2026-01-01~2026-07-02` when run on July 2, 2026. Pass `--date-range` to query a
+specific period.
 
 Query and download matching PDF reports:
 
@@ -35,7 +38,6 @@ Query and download matching PDF reports:
 cargo run -- query `
   --market szse `
   --stock 000001 `
-  --date-range 2023-01-01~2023-12-31 `
   --download `
   --output-dir data
 ```
