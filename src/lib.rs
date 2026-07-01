@@ -257,7 +257,7 @@ impl CnInfoClient {
         let title = sanitize_path_component(required_str(announcement, "announcementTitle")?);
         let adjunct_type = required_str(announcement, "adjunctType")?;
 
-        if adjunct_type != "PDF" {
+        if !is_pdf_adjunct(adjunct_type) {
             return Ok(());
         }
 
@@ -390,6 +390,13 @@ fn sanitize_path_component(input: &str) -> String {
         .to_string()
 }
 
+fn is_pdf_adjunct(adjunct_type: &str) -> bool {
+    adjunct_type
+        .trim()
+        .trim_start_matches('.')
+        .eq_ignore_ascii_case("pdf")
+}
+
 pub fn default_stocks_path() -> PathBuf {
     PathBuf::from("stocks.json")
 }
@@ -401,6 +408,14 @@ mod tests {
     #[test]
     fn sanitizes_windows_path_components() {
         assert_eq!(sanitize_path_component("a/b:c*"), "a-b-c-");
+    }
+
+    #[test]
+    fn accepts_pdf_adjunct_type_variants() {
+        assert!(is_pdf_adjunct("PDF"));
+        assert!(is_pdf_adjunct(".PDF"));
+        assert!(is_pdf_adjunct("pdf"));
+        assert!(!is_pdf_adjunct("XLS"));
     }
 
     #[test]
