@@ -310,6 +310,14 @@ pub async fn save_announcements(path: &Path, announcements: &[Value]) -> Result<
         .with_context(|| format!("failed to write {}", path.display()))
 }
 
+pub async fn save_announcements_xml(path: &Path, announcements: &[Value]) -> Result<()> {
+    create_parent_dir(path).await?;
+    let data = announcements_to_xml(announcements)?;
+    tokio::fs::write(path, data)
+        .await
+        .with_context(|| format!("failed to write {}", path.display()))
+}
+
 pub async fn load_announcements(path: &Path) -> Result<Vec<Value>> {
     let data = tokio::fs::read_to_string(path)
         .await
@@ -328,6 +336,76 @@ async fn create_parent_dir(path: &Path) -> Result<()> {
     }
 
     Ok(())
+}
+
+fn announcements_to_xml(announcements: &[Value]) -> Result<String> {
+    let mut xml = String::from("<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n");
+    xml.push_str(&format!(
+        "<cninfoAnnouncements count=\"{}\">\n",
+        announcements.len()
+    ));
+
+    for (index, announcement) in announcements.iter().enumerate() {
+        xml.push_str(&format!("  <announcement index=\"{}\">\n", index + 1));
+        match announcement {
+            Value::Object(fields) => {
+                for (name, value) in fields {
+                    write_xml_field(&mut xml, name, value)?;
+                }
+            }
+            value => write_xml_field(&mut xml, "value", value)?,
+        }
+        xml.push_str("  </announcement>\n");
+    }
+
+    xml.push_str("</cninfoAnnouncements>\n");
+    Ok(xml)
+}
+
+fn write_xml_field(xml: &mut String, name: &str, value: &Value) -> Result<()> {
+    let value_type = json_value_type(value);
+    let text = match value {
+        Value::Null => String::new(),
+        Value::String(value) => value.clone(),
+        Value::Bool(value) => value.to_string(),
+        Value::Number(value) => value.to_string(),
+        Value::Array(_) | Value::Object(_) => {
+            serde_json::to_string(value).context("failed to serialize nested JSON value")?
+        }
+    };
+
+    xml.push_str(&format!(
+        "    <field name=\"{}\" type=\"{}\">{}</field>\n",
+        xml_escape(name),
+        value_type,
+        xml_escape(&text)
+    ));
+    Ok(())
+}
+
+fn json_value_type(value: &Value) -> &'static str {
+    match value {
+        Value::Null => "null",
+        Value::Bool(_) => "bool",
+        Value::Number(_) => "number",
+        Value::String(_) => "string",
+        Value::Array(_) => "array",
+        Value::Object(_) => "object",
+    }
+}
+
+fn xml_escape(input: &str) -> String {
+    input
+        .chars()
+        .flat_map(|ch| match ch {
+            '&' => "&amp;".chars().collect::<Vec<_>>(),
+            '<' => "&lt;".chars().collect(),
+            '>' => "&gt;".chars().collect(),
+            '"' => "&quot;".chars().collect(),
+            '\'' => "&apos;".chars().collect(),
+            ch => vec![ch],
+        })
+        .collect()
 }
 
 pub fn announcement_pdf_path(announcement: &Value, output_dir: &Path) -> Result<Option<PathBuf>> {
@@ -444,6 +522,25 @@ mod tests {
                 .join("000001_平安-银行")
                 .join("000001_平安-银行_2025-年度报告_123.pdf")
         );
+    }
+
+    #[test]
+    fn exports_announcements_as_xml() {
+        let announcements = vec![serde_json::json!({
+            "secCode": "000001",
+            "announcementTitle": "A&B <年度>",
+            "page": 1,
+            "nested": { "x": true }
+        })];
+
+        let xml = announcements_to_xml(&announcements).unwrap();
+
+        assert!(xml.contains("<cninfoAnnouncements count=\"1\">"));
+        assert!(xml.contains("<announcement index=\"1\">"));
+        assert!(xml.contains("<field name=\"secCode\" type=\"string\">000001</field>"));
+        assert!(xml.contains("A&amp;B &lt;年度&gt;"));
+        assert!(xml.contains("<field name=\"page\" type=\"number\">1</field>"));
+        assert!(xml.contains("{&quot;x&quot;:true}"));
     }
 
     #[test]

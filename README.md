@@ -5,6 +5,7 @@
 它适合做几类事情：
 
 - 按股票代码查询公告元数据
+- 导出 JSON 或 XML 格式的公告元数据
 - 下载公告 PDF
 - 默认抓取当年截至今天的数据
 - 一键抓取 A 股全市场定期财报
@@ -44,6 +45,15 @@ cargo run -- query `
   --market szse `
   --stock 000001 `
   --output-json output/000001-announcements.json
+```
+
+如果需要 XML 格式，可以使用 `--output-xml`：
+
+```powershell
+cargo run -- query `
+  --market szse `
+  --stock 000001 `
+  --output-xml output/000001-announcements.xml
 ```
 
 查询并下载单只股票今年以来的 PDF：
@@ -106,6 +116,8 @@ cargo run -- query `
 默认情况下：
 
 - 公告元数据 JSON 打印到 stdout
+- 传入 `--output-json` 会保存 JSON
+- 传入 `--output-xml` 会保存 XML
 - 只有传入 `--download` 才会下载 PDF
 - PDF 默认下载到当前工作目录下的 `data/`
 - 股票代码缓存默认读取当前工作目录下的 `stocks.json`
@@ -116,6 +128,7 @@ cargo run -- query `
 cargo run -- query `
   --stock 000001 `
   --output-json output/000001.json `
+  --output-xml output/000001.xml `
   --download `
   --output-dir output/000001-pdf
 ```
@@ -125,6 +138,7 @@ cargo run -- query `
 ```text
 date range: 2026-01-01~2026-07-02
 announcement JSON: output/000001.json
+announcement XML: output/000001.xml
 PDF output directory: output/000001-pdf
 ```
 
@@ -140,9 +154,27 @@ PDF output directory: output/000001-pdf
 | `--category <分类>` | 手动指定公告分类，可重复传入 |
 | `--date-range <范围>` | 指定日期范围，格式为 `YYYY-MM-DD~YYYY-MM-DD` |
 | `--output-json <路径>` | 保存公告元数据 JSON |
+| `--output-xml <路径>` | 保存公告元数据 XML |
 | `--download` | 下载公告 PDF |
 | `--output-dir <目录>` | 指定 PDF 下载目录 |
 | `--max-concurrent <数量>` | PDF 并发下载数，默认 `5` |
+
+## XML 导出格式
+
+XML 导出使用稳定的字段结构，而不是把巨潮字段名直接作为 XML 标签：
+
+```xml
+<?xml version="1.0" encoding="UTF-8"?>
+<cninfoAnnouncements count="1">
+  <announcement index="1">
+    <field name="secCode" type="string">000001</field>
+    <field name="announcementTitle" type="string">2025年年度报告</field>
+  </announcement>
+</cninfoAnnouncements>
+```
+
+这样可以兼容字段名变化，也能保留数组、对象等复杂字段。复杂字段会以紧凑
+JSON 字符串写入对应的 `<field>` 文本。
 
 ## 完整性校验
 

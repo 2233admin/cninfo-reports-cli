@@ -6,7 +6,7 @@ use chrono::{Datelike, Days, Local, NaiveDate};
 use clap::{Args, Parser, Subcommand};
 use cninfo_reports_cli::{
     AnnouncementQuery, CnInfoClient, announcement_pdf_path, default_stocks_path,
-    load_announcements, load_stocks, save_announcements, save_stocks,
+    load_announcements, load_stocks, save_announcements, save_announcements_xml, save_stocks,
 };
 use serde_json::Value;
 use std::collections::{HashSet, VecDeque};
@@ -93,6 +93,9 @@ struct QueryArgs {
     /// Write query result JSON to this file.
     #[arg(long)]
     output_json: Option<PathBuf>,
+    /// Write query result XML to this file.
+    #[arg(long)]
+    output_xml: Option<PathBuf>,
     /// Download PDF files for matching announcements.
     #[arg(long)]
     download: bool,
@@ -129,6 +132,7 @@ async fn main() -> Result<()> {
                 date_range,
                 stocks_json,
                 output_json,
+                output_xml,
                 download,
                 output_dir,
                 max_concurrent,
@@ -159,6 +163,9 @@ async fn main() -> Result<()> {
             } else {
                 eprintln!("announcement JSON: stdout");
             }
+            if let Some(path) = &output_xml {
+                eprintln!("announcement XML: {}", path.display());
+            }
             if download {
                 eprintln!("PDF output directory: {}", output_dir.display());
             } else {
@@ -170,12 +177,16 @@ async fn main() -> Result<()> {
             } else {
                 client.query_announcements(&stocks, &query).await?
             };
-            if output_json.is_none() {
+            if output_json.is_none() && output_xml.is_none() {
                 println!("{}", serde_json::to_string_pretty(&announcements)?);
             }
 
             if let Some(path) = output_json {
                 save_announcements(&path, &announcements).await?;
+                eprintln!("wrote {}", path.display());
+            }
+            if let Some(path) = output_xml {
+                save_announcements_xml(&path, &announcements).await?;
                 eprintln!("wrote {}", path.display());
             }
 
