@@ -1,0 +1,6 @@
+{
+  "name": "cninfo-reports",
+  "version": "0.1.0",
+  "opencli": ">=1.0.0",
+  "description": "Verified CNINFO announcement and report capabilities backed by cninfo-reports-cli"
+}
