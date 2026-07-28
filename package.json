@@ -1,0 +1,13 @@
+{
+  "name": "opencli-plugin-cninfo-reports",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "postinstall": "node opencli/install.mjs",
+    "test": "node --test tests/opencli-runtime.test.mjs"
+  },
+  "peerDependencies": {
+    "@jackwener/opencli": ">=1.0.0"
+  }
+}

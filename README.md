@@ -30,6 +30,25 @@ target/release/cninfo-reports-cli.exe
 cargo run -- <命令>
 ```
 
+## 作为 OpenCLI 能力安装
+
+仓库同时提供 OpenCLI 插件声明。安装后，OpenCLI Admin 会通过统一的
+`opencli list -f json` 能力目录自动发现节点，不需要在管理端手写巨潮节点：
+
+```powershell
+opencli plugin install github:2233admin/cninfo-reports-cli
+opencli list -f json
+opencli cninfo-reports query-stock --stock 000001 -f json
+```
+
+插件只负责参数 schema 和安全的 argv 透传，查询、分片、去重、下载和审计逻辑
+仍由本仓库的 `cninfo-reports-cli` 二进制执行。若二进制不在 `PATH`，可设置
+`CNINFO_REPORTS_CLI_BIN` 指向已构建的可执行文件。默认执行超时为 5 分钟，
+输出上限为 64 MiB、单次最多返回 50,000 条；需要调整时可设置
+`CNINFO_REPORTS_CLI_TIMEOUT_MS`、`CNINFO_REPORTS_CLI_MAX_BUFFER_BYTES` 与
+`CNINFO_REPORTS_CLI_MAX_ITEMS`。OpenCLI 安装插件时会运行 `cargo build --release`，
+运行时优先使用插件目录内构建好的二进制。
+
 ## 快速开始
 
 更新本地股票代码缓存：
